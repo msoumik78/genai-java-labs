@@ -3,11 +3,11 @@ package com.javagenai.lab1.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "lab")
-public record LabProperties(
+public record LabPropertiesConfig(
         long extraHoldMs,
         int fenceSize
 ) {
-    public LabProperties {
+    public LabPropertiesConfig {
         if (extraHoldMs < 0) {
             extraHoldMs = 0;
         }

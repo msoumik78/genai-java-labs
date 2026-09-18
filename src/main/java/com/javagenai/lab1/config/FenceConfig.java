@@ -9,11 +9,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 @Configuration
-@EnableConfigurationProperties(LabProperties.class)
+@EnableConfigurationProperties(LabPropertiesConfig.class)
 public class FenceConfig {
 
     @Bean(name = "llmFence")
-    Executor llmFence(LabProperties lab) {
+    Executor llmFence(LabPropertiesConfig lab) {
         ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
         ex.setThreadNamePrefix("llm-fence-");
         ex.setCorePoolSize(lab.fenceSize());

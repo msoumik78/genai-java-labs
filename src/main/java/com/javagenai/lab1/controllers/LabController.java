@@ -6,9 +6,9 @@ import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadPoolExecutor;
 
-import com.javagenai.lab1.config.LabProperties;
-import com.javagenai.lab1.services.ModelCall;
-import com.javagenai.lab1.services.RefundLedger;
+import com.javagenai.lab1.config.LabPropertiesConfig;
+import com.javagenai.lab1.services.ModelCallService;
+import com.javagenai.lab1.services.RefundLedgerService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,16 +18,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class LabController {
 
-    private final ModelCall model;
-    private final RefundLedger ledger;
+    private final ModelCallService model;
+    private final RefundLedgerService ledger;
     private final Executor llmFence;
-    private final LabProperties lab;
+    private final LabPropertiesConfig lab;
 
     public LabController(
-            ModelCall model,
-            RefundLedger ledger,
+            ModelCallService model,
+            RefundLedgerService ledger,
             @Qualifier("llmFence") Executor llmFence,
-            LabProperties lab) {
+            LabPropertiesConfig lab) {
         this.model = model;
         this.ledger = ledger;
         this.llmFence = llmFence;

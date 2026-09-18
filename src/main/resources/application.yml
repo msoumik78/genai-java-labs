@@ -1,13 +1,23 @@
-server.port: 18080
-server.tomcat.threads.max: 8
-server.tomcat.threads.min-spare: 2
+server:
+  port: 18080
+  tomcat:
+    threads:
+      max: 8
+      min-spare: 2
 
-spring.threads.virtual.enabled: false
+spring:
+  threads:
+    virtual:
+      enabled: false
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        options:
+          model: llama3.2:1b
+          num-predict: 32
+          temperature: 0
 
-spring.ai.ollama.base-url: http://localhost:11434
-spring.ai.ollama.chat.options.model: llama3.2:1b
-spring.ai.ollama.chat.options.num-predict: 32
-spring.ai.ollama.chat.options.temperature: 0
-
-lab.extra-hold-ms: 8000
-lab.fence-size: 2
+lab:
+  extra-hold-ms: 8000
+  fence-size: 2

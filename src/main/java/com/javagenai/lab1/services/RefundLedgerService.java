@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Service;
 
 @Service
-public class RefundLedger {
+public class RefundLedgerService {
 
     private final AtomicInteger refunds = new AtomicInteger();
 
