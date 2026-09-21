@@ -55,5 +55,6 @@ out/
 *.pem
 *.key
 
-# Spring Boot
-spring-boot-devtools.properties
+# Hugging Face / DJL / ONNX caches
+.cache/
+
