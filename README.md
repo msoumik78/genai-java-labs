@@ -1,71 +1,40 @@
-# Lab 1 — Fence the LLM (Spring AI + Ollama)
+# Document ingest
 
-Lean Spring Boot app for the Saturday workshop: **a slow model must not starve the rest of the service**, and **you must not retry a completion like a GET**.
+Plain Java. One pipeline loads, splits, and embeds with the in-process MiniLM model (`all-MiniLM-L6-v2`, quantized ONNX). The vector store is a strategy: Chroma, Pinecone, or Qdrant.
 
-Assumes **Ollama** on `http://localhost:11434` with a chat model (default `llama3.2`). Pull if needed:
+Each run clears that store, inserts the files in `docs/`, and prints the inserted segments plus the top 2 matches for "where is the refund policy".
 
-```bash
-ollama pull llama3.2
-```
-
-Java 21. No Jlama. Tomcat is capped at **8** threads so a laptop can show the blast radius.
-
-## Run
+Java 21. From the project root:
 
 ```bash
-mvn spring-boot:run
+mvn test
 ```
 
-App: `http://127.0.0.1:18080`
+## Qdrant
 
-| Method | Path | What it shows |
-|---|---|---|
-| GET | `/orders` | Fast API (1 ms). Must stay fast while chat is busy. |
-| GET | `/chat/naive?q=ping` | LLM on the **request thread** (+ `lab.extra-hold-ms`). |
-| GET | `/chat/fenced?q=ping` | Same call, max **2** in flight. Extra chats get **429**. |
-| GET | `/refund/bad-retry?orderId=A-1` | Side effect **inside** the retry loop → 3 ledger posts. |
-| GET | `/refund/idempotent?orderId=A-1` | Side effect **once**, then retry the model. |
-| GET | `/lab/stats` | Hold ms, fence size, refund count. |
-| POST | `/lab/reset-ledger` | Zero the demo counter. |
-
-`lab.extra-hold-ms` (default **8000**) sleeps **before** Ollama so the demo works even if the model is fast. Set `0` to use only real generation time.
-
-```yaml
-lab.extra-hold-ms: 8000
-lab.fence-size: 2
-spring.ai.ollama.chat.options.model: llama3.2
-```
-
-## Demo (two terminals)
-
-**A — orders should stay snappy**
+Qdrant is not started by this program. Start one container (REST 6333, gRPC 6334). The program uses gRPC.
 
 ```bash
-while true; do curl -s -w " %{time_total}\n" http://127.0.0.1:18080/orders; sleep 0.5; done
+docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant
+mvn -q exec:java -Dexec.args="qdrant docs"
 ```
 
-**B — naive (orders will stall)**
+Optional environment variables: `QDRANT_HOST` (default `localhost`), `QDRANT_PORT` (default `6334`), `QDRANT_COLLECTION` (default `docs`).
+
+## Chroma
 
 ```bash
-chmod +x scripts/*.sh
-./scripts/storm-chat.sh 10 /chat/naive
+docker run -d --name chroma -p 8000:8000 chromadb/chroma
+mvn -q exec:java -Dexec.args="chroma docs"
 ```
 
-**B — fenced (orders stay up; extra chat is 429)**
+Optional: `CHROMA_URL` (default `http://localhost:8000`), `CHROMA_COLLECTION` (default `docs`).
+
+## Pinecone
 
 ```bash
-./scripts/storm-chat.sh 10 /chat/fenced
+export PINECONE_API_KEY=...
+mvn -q exec:java -Dexec.args="pinecone docs"
 ```
 
-**Retry / double refund**
-
-```bash
-curl -s http://127.0.0.1:18080/lab/reset-ledger
-curl -s http://127.0.0.1:18080/refund/bad-retry
-# refundsPosted = 3
-curl -s -X POST http://127.0.0.1:18080/lab/reset-ledger
-curl -s http://127.0.0.1:18080/refund/idempotent
-# refundsPosted = 1
-```
-
-Facilitator timing: [SATURDAY.md](SATURDAY.md).
+Optional: `PINECONE_INDEX` (default `docs`). The index must be 384-dimensional, matching MiniLM.
