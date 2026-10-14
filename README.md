@@ -1,14 +1,14 @@
-# Lab 1 — Fence the LLM (Spring AI + Ollama)
+# Lab 6 — Token usage per tenant (Spring AI + Micrometer)
 
-Lean Spring Boot app for the Saturday workshop: **a slow model must not starve the rest of the service**, and **you must not retry a completion like a GET**.
+One chat endpoint against local Ollama. Spring AI already creates a Micrometer observation for `ChatModel`. Token counts are span attributes only, so this lab copies the exact usage onto counters you can aggregate by tenant.
 
-Assumes **Ollama** on `http://localhost:11434` with a chat model (default `llama3.2`). Pull if needed:
+Assumes Ollama on `http://localhost:11434`:
 
 ```bash
-ollama pull llama3.2
+ollama pull llama3.2:1b
 ```
 
-Java 21. No Jlama. Tomcat is capped at **8** threads so a laptop can show the blast radius.
+Java 21.
 
 ## Run
 
@@ -16,56 +16,42 @@ Java 21. No Jlama. Tomcat is capped at **8** threads so a laptop can show the bl
 mvn spring-boot:run
 ```
 
-App: `http://127.0.0.1:18080`
-
 | Method | Path | What it shows |
 |---|---|---|
-| GET | `/orders` | Fast API (1 ms). Must stay fast while chat is busy. |
-| GET | `/chat/naive?q=ping` | LLM on the **request thread** (+ `lab.extra-hold-ms`). |
-| GET | `/chat/fenced?q=ping` | Same call, max **2** in flight. Extra chats get **429**. |
-| GET | `/refund/bad-retry?orderId=A-1` | Side effect **inside** the retry loop → 3 ledger posts. |
-| GET | `/refund/idempotent?orderId=A-1` | Side effect **once**, then retry the model. |
-| GET | `/lab/stats` | Hold ms, fence size, refund count. |
-| POST | `/lab/reset-ledger` | Zero the demo counter. |
-
-`lab.extra-hold-ms` (default **8000**) sleeps **before** Ollama so the demo works even if the model is fast. Set `0` to use only real generation time.
-
-```yaml
-lab.extra-hold-ms: 8000
-lab.fence-size: 2
-spring.ai.ollama.chat.options.model: llama3.2
-```
-
-## Demo (two terminals)
-
-**A — orders should stay snappy**
+| GET | `/chat?q=hello&tenant=acme` | One Ollama call. Response includes this call's input and output tokens. |
+| GET | `/usage` | Running totals from the custom meters. |
+| GET | `/actuator/prometheus` | Same meters for scrape. Spring AI's chat timer is here too. |
 
 ```bash
-while true; do curl -s -w " %{time_total}\n" http://127.0.0.1:18080/orders; sleep 0.5; done
+curl -s "http://127.0.0.1:18080/chat?q=Say%20hello&tenant=acme"
+curl -s "http://127.0.0.1:18080/chat?q=Say%20hello&tenant=globex"
+curl -s http://127.0.0.1:18080/usage
+curl -s http://127.0.0.1:18080/actuator/prometheus | grep genai_chat
 ```
 
-**B — naive (orders will stall)**
+`genai_chat_tokens_total{tenant,model,token_type}` is the aggregate. `token_type` is `input` or `output`. `genai_chat_calls_total` counts completed chats. The observation filter also adds `tenant` as a low-cardinality tag on the Spring AI chat span.
+
+Keep the tenant set small. A raw user id is fine on a trace, and a poor Prometheus label.
+
+## Docker Compose
+
+Ollama stays on the host (`localhost:11434`). The app container reaches it through `host.docker.internal`. Prometheus scrapes `app:18080/actuator/prometheus` every 5 seconds.
 
 ```bash
-chmod +x scripts/*.sh
-./scripts/storm-chat.sh 10 /chat/naive
+docker compose up --build
 ```
 
-**B — fenced (orders stay up; extra chat is 429)**
+App: `http://127.0.0.1:18080`. Prometheus: `http://127.0.0.1:9090`.
 
 ```bash
-./scripts/storm-chat.sh 10 /chat/fenced
+curl -s "http://127.0.0.1:18080/chat?q=Say%20hello&tenant=acme"
+curl -s "http://127.0.0.1:18080/chat?q=Say%20hello&tenant=globex"
 ```
 
-**Retry / double refund**
+The counter is registered on the first completed chat, so run the curls above before opening the graph. In the Prometheus graph box, this draws one line per tenant and token direction:
 
-```bash
-curl -s http://127.0.0.1:18080/lab/reset-ledger
-curl -s http://127.0.0.1:18080/refund/bad-retry
-# refundsPosted = 3
-curl -s -X POST http://127.0.0.1:18080/lab/reset-ledger
-curl -s http://127.0.0.1:18080/refund/idempotent
-# refundsPosted = 1
+```promql
+sum by (tenant, token_type) (genai_chat_tokens_total{tenant=~"acme|globex"})
 ```
 
-Facilitator timing: [SATURDAY.md](SATURDAY.md).
+The legend is the tenant plus `token_type` (`input` or `output`), so acme and globex stay on separate lines.
