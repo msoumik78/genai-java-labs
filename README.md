@@ -1,71 +1,64 @@
-# Lab 1 — Fence the LLM (Spring AI + Ollama)
+# Enterprise Knowledge Assistant
 
-Lean Spring Boot app for the Saturday workshop: **a slow model must not starve the rest of the service**, and **you must not retry a completion like a GET**.
+Quarkus service that turns policy documents into grounded answers. Parsing, chunking, and embedding stay local. Generation and judging call DeepSeek. Postgres holds the chunks, the vector index, lexical search, and evaluation runs.
 
-Assumes **Ollama** on `http://localhost:11434` with a chat model (default `llama3.2`). Pull if needed:
-
-```bash
-ollama pull llama3.2
-```
-
-Java 21. No Jlama. Tomcat is capped at **8** threads so a laptop can show the blast radius.
+Java 21. Module: `enterprise-kb-assistant`.
 
 ## Run
 
 ```bash
-mvn spring-boot:run
+cd enterprise-kb-assistant
+mvn quarkus:dev
 ```
 
-App: `http://127.0.0.1:18080`
+Needs Postgres (`kb` / `kb` on `localhost:5432` by default), `DEEPSEEK_API_KEY`, and the `docling` CLI when `kb.ingestion.parser` is `docling-cli`. Configuration lives in `src/main/resources/application.yaml`. Quarkus does not load YAML unless `quarkus-config-yaml` is on the classpath; that dependency is already in the module POM.
 
-| Method | Path | What it shows |
-|---|---|---|
-| GET | `/orders` | Fast API (1 ms). Must stay fast while chat is busy. |
-| GET | `/chat/naive?q=ping` | LLM on the **request thread** (+ `lab.extra-hold-ms`). |
-| GET | `/chat/fenced?q=ping` | Same call, max **2** in flight. Extra chats get **429**. |
-| GET | `/refund/bad-retry?orderId=A-1` | Side effect **inside** the retry loop → 3 ledger posts. |
-| GET | `/refund/idempotent?orderId=A-1` | Side effect **once**, then retry the model. |
-| GET | `/lab/stats` | Hold ms, fence size, refund count. |
-| POST | `/lab/reset-ledger` | Zero the demo counter. |
+The only HTTP surface today is `GET /dashboard`, which renders stored evaluation runs.
 
-`lab.extra-hold-ms` (default **8000**) sleeps **before** Ollama so the demo works even if the model is fast. Set `0` to use only real generation time.
+## Control flow
 
-```yaml
-lab.extra-hold-ms: 8000
-lab.fence-size: 2
-spring.ai.ollama.chat.options.model: llama3.2
+Documents are ingested offline. A question then goes through retrieval, generation, and an independent judge. Evaluation rows land in Postgres and show up on the dashboard.
+
+```mermaid
+flowchart TD
+    source["Source file"] --> parser{"kb.ingestion.parser"}
+    parser -->|docling-cli| cli["DoclingCliParser"]
+    parser -->|docling-serve| serve["DoclingServeParser"]
+    cli --> ingestor["DocumentIngestor"]
+    serve --> ingestor
+    ingestor --> structured["StructuredDocument\nsections and blocks"]
+    structured --> chunker["SectionAwareChunker"]
+    chunker --> embed["NomicEmbeddingModel\nONNX, document prefix"]
+    embed --> store["ChunkStore\nPostgres: vector, lexical, roles"]
+
+    question["Question + role"] --> hybrid["HybridRetriever"]
+    hybrid --> meaning["Vector search\nquery prefix"]
+    hybrid --> words["Lexical search"]
+    meaning --> rrf["Reciprocal rank fusion"]
+    words --> rrf
+    store --> meaning
+    store --> words
+    rrf --> gen["GroundedGenerator"]
+    gen -->|empty context| abstain["ABSTAIN"]
+    gen -->|context| deepseek["DeepSeekChatClient\ngeneration model"]
+    deepseek --> cites["CitationCheck"]
+    cites --> judge["FaithfulnessJudge\nseparate model"]
+    judge --> eval["JdbcEvaluationStore"]
+    eval --> dash["GET /dashboard"]
 ```
 
-## Demo (two terminals)
+### Ingest
 
-**A — orders should stay snappy**
+`ParserSelection` reads `kb.ingestion.parser` and picks `DoclingCliParser` (subprocess) or `DoclingServeParser` (HTTP). `DocumentIngestor` keeps the structured document, the parser name, and a SHA-256 of the source bytes.
 
-```bash
-while true; do curl -s -w " %{time_total}\n" http://127.0.0.1:18080/orders; sleep 0.5; done
-```
+`SectionAwareChunker` walks sections. Tables stay whole. Each chunk keeps the heading path and the roles allowed to see it. `NomicEmbeddingModel` embeds with the document prefix and stores the vector through `ChunkStore`.
 
-**B — naive (orders will stall)**
+### Ask
 
-```bash
-chmod +x scripts/*.sh
-./scripts/storm-chat.sh 10 /chat/naive
-```
+`HybridRetriever` embeds the question with the query prefix and runs vector search and lexical search in parallel, both already filtered by role in SQL. `ReciprocalRankFusion` merges the two rankings by position. The candidate list is larger than the final cut so a later reranker has room to reorder.
 
-**B — fenced (orders stay up; extra chat is 429)**
+`GroundedGenerator` refuses to call the model when the context is empty and returns `ABSTAIN`. Otherwise it asks DeepSeek to answer only from the numbered chunks and to cite them as `[1]`. `CitationCheck` checks that every citation points at a chunk that was actually retrieved.
 
-```bash
-./scripts/storm-chat.sh 10 /chat/fenced
-```
+### Judge and dashboard
 
-**Retry / double refund**
-
-```bash
-curl -s http://127.0.0.1:18080/lab/reset-ledger
-curl -s http://127.0.0.1:18080/refund/bad-retry
-# refundsPosted = 3
-curl -s -X POST http://127.0.0.1:18080/lab/reset-ledger
-curl -s http://127.0.0.1:18080/refund/idempotent
-# refundsPosted = 1
-```
-
-Facilitator timing: [SATURDAY.md](SATURDAY.md).
+`FaithfulnessJudge` sends the question, the answer, and the same context to a different DeepSeek model. Abstentions are not graded. The judge returns claim verdicts plus relevancy and completeness. `JdbcEvaluationStore` persists runs. `DashboardResource` reads them and renders citation validity, abstain rate, faithfulness, and recall against faithfulness.

@@ -1,0 +1,68 @@
+# Local ONNX embedder. The embedder runs in-process, so queries cost nothing
+# beyond CPU time. dimension must match the stored vectors; truncating an MRL
+# model lets the same corpus be evaluated at several sizes without re-embedding.
+kb:
+  embedding:
+    model-id: nomic-ai/nomic-embed-text-v1.5
+    dimension: 512
+    quantized: true
+    # Nomic needs different prefixes for documents and questions. Getting this
+    # wrong costs recall quietly, so it stays visible configuration.
+    document-prefix: "search_document:"
+    query-prefix: "search_query:"
+
+  # Reranking is the single biggest faithfulness lever, and it costs no tokens.
+  reranker:
+    enabled: true
+    model-id: Xenova/bge-reranker-base
+    candidate-size: 50
+    top-k: 5
+
+  retrieval:
+    candidate-k: 50
+    rrf-k: 60
+
+  # Judge is deliberately a different model from the generator, so the judge
+  # is never grading its own homework.
+  deepseek:
+    base-url: https://api.deepseek.com
+    timeout-seconds: 60
+  generation:
+    model: deepseek-v4-pro
+    temperature: 0.0
+  judge:
+    model: deepseek-flash
+    temperature: 0.0
+
+  # docling-cli runs a subprocess; docling-serve posts to a running service.
+  ingestion:
+    parser: docling-cli
+    docling:
+      command: docling
+      base-url: http://localhost:5001
+      timeout-seconds: 300
+
+  chunking:
+    target-tokens: 400
+    max-tokens: 600
+    min-tokens: 40
+
+deepseek:
+  # A non-empty sentinel: empty strings are converted to null by SmallRye and
+  # fail config validation. The app boots without a real key; generation fails
+  # clearly at call time instead. Export DEEPSEEK_API_KEY or use .env in compose.
+  api-key: ${DEEPSEEK_API_KEY:no-key-configured}
+
+quarkus:
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:kb}
+    password: ${POSTGRES_PASSWORD:kb}
+    jdbc:
+      url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/kb}
+  flyway:
+    migrate-at-start: true
+  log:
+    category:
+      "com.javagenai.kb":
+        level: INFO

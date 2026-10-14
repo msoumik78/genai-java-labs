@@ -1,0 +1,67 @@
+# One command for the whole demo:
+#   docker compose up --build
+# then ingest with POST /demo/ingest, ask with POST /demo/ask, open /dashboard.
+#
+# The DeepSeek key is deliberately NOT stored here; pass it through .env
+# (see .env.example) so no secret ever lands in an image layer.
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: kb
+      POSTGRES_USER: kb
+      POSTGRES_PASSWORD: kb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kb -d kb"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # The only Python process: converts documents to structure over HTTP.
+  # NOTE: "-cpu" is a separate image NAME (not a tag); tags are latest/main.
+  # Models are baked into the image, so no model volume is mounted.
+  docling-serve:
+    image: ghcr.io/docling-project/docling-serve-cpu:latest
+    ports:
+      - "5001:5001"
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "false"
+    healthcheck:
+      # /ready returns 503 until models are loaded, so the app never converts
+      # against a half-warm service. python3 is guaranteed in this image.
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5001/ready', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      retries: 30
+      start_period: 60s
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      docling-serve:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      # Sentinel default: an *empty* env var fails config validation in the JVM,
+      # and without a key the app must still boot (Tier 1 experiments still work).
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-no-key-configured}
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/kb
+      POSTGRES_USER: kb
+      POSTGRES_PASSWORD: kb
+      # MicroProfile maps kb.ingestion.docling.base-url -> KB_INGESTION_DOCLING_BASE_URL
+      KB_INGESTION_PARSER: docling-serve
+      KB_INGESTION_DOCLING_BASE_URL: http://docling-serve:5001
+    volumes:
+      - onnx-models:/home/kb/.cache/kb-models
+
+volumes:
+  pgdata:
+  onnx-models:
