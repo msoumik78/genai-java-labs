@@ -57,3 +57,6 @@ out/
 
 # Spring Boot
 spring-boot-devtools.properties
+
+# Local embedding model (downloaded by scripts/download-model.sh)
+models/
