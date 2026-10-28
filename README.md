@@ -1,71 +1,52 @@
-# Lab 1 — Fence the LLM (Spring AI + Ollama)
+# Lab 11 — A2A (Spring AI)
 
-Lean Spring Boot app for the Saturday workshop: **a slow model must not starve the rest of the service**, and **you must not retry a completion like a GET**.
+Two separate Maven projects. The facts server publishes an Agent Card. The host learns the agent from that card and sends a JSON-RPC message. They do not call each other in-process.
 
-Assumes **Ollama** on `http://localhost:11434` with a chat model (default `llama3.2`). Pull if needed:
+Ollama on `http://localhost:11434` with `qwen2.5:7b`:
 
 ```bash
-ollama pull llama3.2
+ollama pull qwen2.5:7b
 ```
 
-Java 21. No Jlama. Tomcat is capped at **8** threads so a laptop can show the blast radius.
+Java 21. Spring Boot 4.0.6 and Spring AI 2.0.0, because `spring-ai-a2a-server` 0.3.0 is built for that line.
 
-## Run
+## Server — order facts
 
 ```bash
+cd a2a-server
 mvn spring-boot:run
 ```
 
-App: `http://127.0.0.1:18080`
+`http://127.0.0.1:18081`
 
 | Method | Path | What it shows |
 |---|---|---|
-| GET | `/orders` | Fast API (1 ms). Must stay fast while chat is busy. |
-| GET | `/chat/naive?q=ping` | LLM on the **request thread** (+ `lab.extra-hold-ms`). |
-| GET | `/chat/fenced?q=ping` | Same call, max **2** in flight. Extra chats get **429**. |
-| GET | `/refund/bad-retry?orderId=A-1` | Side effect **inside** the retry loop → 3 ledger posts. |
-| GET | `/refund/idempotent?orderId=A-1` | Side effect **once**, then retry the model. |
-| GET | `/lab/stats` | Hold ms, fence size, refund count. |
-| POST | `/lab/reset-ledger` | Zero the demo counter. |
+| GET | `/.well-known/agent-card.json` | Agent Card (name, skill `order_facts`, URL) |
+| GET | `/card` | Same card |
+| POST | `/` | JSON-RPC `message/send` (used by the client) |
 
-`lab.extra-hold-ms` (default **8000**) sleeps **before** Ollama so the demo works even if the model is fast. Set `0` to use only real generation time.
+Known orders: `A-100` SHIPPED, `B-200` PACKED, `C-300` CANCELLED.
 
-```yaml
-lab.extra-hold-ms: 8000
-lab.fence-size: 2
-spring.ai.ollama.chat.options.model: llama3.2
-```
+## Client — host
 
-## Demo (two terminals)
-
-**A — orders should stay snappy**
+Start the server first so discovery succeeds at startup. If the client starts first, call `/discover` after the server is up.
 
 ```bash
-while true; do curl -s -w " %{time_total}\n" http://127.0.0.1:18080/orders; sleep 0.5; done
+cd a2a-client
+mvn spring-boot:run
 ```
 
-**B — naive (orders will stall)**
+`http://127.0.0.1:18082`
+
+| Method | Path | What it shows |
+|---|---|---|
+| GET | `/discover` | Fetches the remote Agent Card |
+| GET | `/ask?q=What is the status of order A-100?` | Host model delegates over A2A |
 
 ```bash
-chmod +x scripts/*.sh
-./scripts/storm-chat.sh 10 /chat/naive
+curl -s http://127.0.0.1:18081/.well-known/agent-card.json
+curl -s http://127.0.0.1:18082/discover
+curl -s "http://127.0.0.1:18082/ask?q=What%20is%20the%20status%20of%20order%20A-100%3F"
 ```
 
-**B — fenced (orders stay up; extra chat is 429)**
-
-```bash
-./scripts/storm-chat.sh 10 /chat/fenced
-```
-
-**Retry / double refund**
-
-```bash
-curl -s http://127.0.0.1:18080/lab/reset-ledger
-curl -s http://127.0.0.1:18080/refund/bad-retry
-# refundsPosted = 3
-curl -s -X POST http://127.0.0.1:18080/lab/reset-ledger
-curl -s http://127.0.0.1:18080/refund/idempotent
-# refundsPosted = 1
-```
-
-Facilitator timing: [SATURDAY.md](SATURDAY.md).
+The host is configured with only `remote.agent.url`. The agent name and skills come from the card.

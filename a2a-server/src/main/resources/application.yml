@@ -1,0 +1,22 @@
+server:
+  port: 18081
+
+spring:
+  ai:
+    a2a:
+      server:
+        enabled: true
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        options:
+          model: qwen2.5:7b
+
+a2a:
+  blocking:
+    agent:
+      timeout:
+        seconds: 120
+    consumption:
+      timeout:
+        seconds: 30
