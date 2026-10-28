@@ -12,8 +12,22 @@ public final class ValidationAgent implements Agent {
     }
 
     @Override
+    public boolean accept(String capability) {
+        return card.capabilities().contains(capability);
+    }
+
+    @Override
     public String execute(String input) {
+        pause();
         System.out.println("ValidationAgent complete");
         return input;
+    }
+
+    private static void pause() {
+        try {
+            Thread.sleep(800);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
