@@ -1,23 +1,25 @@
 server:
   port: 18080
-  tomcat:
-    threads:
-      max: 8
-      min-spare: 2
 
 spring:
-  threads:
-    virtual:
-      enabled: false
   ai:
     ollama:
       base-url: http://localhost:11434
       chat:
         options:
-          model: llama3.2:1b
-          num-predict: 32
+          model: qwen2.5:7b
           temperature: 0
+          num-predict: 400
+      embedding:
+        options:
+          model: nomic-embed-text
 
-lab:
-  extra-hold-ms: 8000
-  fence-size: 2
+rag:
+  passage-character-limit: 700
+  passage-overlap-characters: 120
+  vector-hit-count: 8
+  lexical-hit-count: 8
+  reciprocal-rank-constant: 60
+  rerank-pool-size: 8
+  passages-in-prompt: 3
+  cross-encoder-directory: models/ms-marco-MiniLM-L6

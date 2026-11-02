@@ -57,3 +57,6 @@ out/
 
 # Spring Boot
 spring-boot-devtools.properties
+
+# Local cross-encoder weights
+models/
