@@ -1,12 +1,12 @@
-package com.javagenai.lab1;
+package com.javagenai.lab13;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class Lab1Application {
+public class Lab13Application {
 
     public static void main(String[] args) {
-        SpringApplication.run(Lab1Application.class, args);
+        SpringApplication.run(Lab13Application.class, args);
     }
 }

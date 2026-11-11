@@ -1,23 +1,17 @@
 server:
   port: 18080
-  tomcat:
-    threads:
-      max: 8
-      min-spare: 2
 
 spring:
-  threads:
-    virtual:
-      enabled: false
   ai:
     ollama:
       base-url: http://localhost:11434
       chat:
         options:
-          model: llama3.2:1b
-          num-predict: 32
+          model: qwen2.5:7b
           temperature: 0
+      embedding:
+        options:
+          model: nomic-embed-text
 
 lab:
-  extra-hold-ms: 8000
-  fence-size: 2
+  top-k: 2
