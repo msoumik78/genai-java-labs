@@ -1,41 +1,55 @@
-# Lab 13 — Score a small RAG pipeline with spring-ai-ragas
+# Lab 14 — MCP server for enterprise tools
 
-A fixed refund corpus, keyword retrieval, and an Ollama answer. Quality is checked by a Spring Boot test, not by a runtime endpoint.
+One Spring Boot process exposes three read-only tools on a single streamable HTTP endpoint, `http://localhost:18080/mcp`.
 
-Java 21. Ollama on `http://localhost:11434`:
-
-```bash
-ollama pull qwen2.5:7b
-ollama pull nomic-embed-text
-```
-
-`qwen2.5:7b` generates the answer and judges faithfulness, response relevancy, and context recall. `nomic-embed-text` is the embedding model response relevancy uses. BLEU compares the answer to a reference and does not call a model.
-
-## Tests
-
-Unit tests do not call Ollama:
-
-```bash
-mvn test
-```
-
-The RAGAS gate needs both models running. It calls `AskService` for two labeled questions and fails the build when a score is outside its bar:
-
-```bash
-mvn test -Pragas
-```
-
-| Question | Passing bar |
+| Tool | System it stands in for |
 |---|---|
-| Refund arrival time (fact is in the corpus) | Faithfulness ≥ 0.5, response relevancy ≥ 0.7, context recall ≥ 0.9, BLEU ≥ 0.15 |
-| Guest wifi password (fact is not in the corpus) | Context recall = 0 and response relevancy < 0.4 |
+| `findOrdersByStatus` | SQL (`orders` in H2). Status is `PAID`, `PENDING`, or `SHIPPED`. At most 20 rows. |
+| `getCustomer` | Customer REST API at `/internal/customers/{id}` |
+| `checkInventory` | Inventory API at `/internal/inventory/{sku}` |
 
-The BLEU bar is low because a correct short answer (`5 business days`) shares little wording with the full reference sentence. It still fails if the answer stops overlapping that sentence. Faithfulness is 0.5 because this judge only partially credits that short answer. The wifi case does not use faithfulness or BLEU as a gate: a correct refusal scores poorly on both.
+The model cannot send SQL or a URL. Each tool is a fixed operation.
 
-```yaml
-lab.top-k: 2
-spring.ai.ollama.chat.options.model: qwen2.5:7b
-spring.ai.ollama.embedding.options.model: nomic-embed-text
+Java 21.
+
+## Run
+
+```bash
+mvn spring-boot:run
 ```
 
-`mvn test -Pragas` makes several judge requests and takes a few minutes.
+## Call it from this app
+
+`/lab` opens an MCP client against the local `/mcp` endpoint, then lists or calls tools. That is the in-process check.
+
+```bash
+curl -s http://localhost:18080/lab/tools
+
+curl -s -X POST http://localhost:18080/lab/call \
+  -H 'content-type: application/json' \
+  -d '{"name":"findOrdersByStatus","arguments":{"status":"PAID"}}'
+```
+
+`mvn test` does the same through the client after the server is listening.
+
+## Call it from outside
+
+Cursor, or any streamable HTTP MCP client, uses the server URL directly:
+
+```json
+{
+  "mcpServers": {
+    "lab14": {
+      "url": "http://localhost:18080/mcp"
+    }
+  }
+}
+```
+
+The MCP Inspector is the other client that speaks the protocol without writing one:
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+Point it at `http://localhost:18080/mcp` with transport Streamable HTTP. The `/internal/**` paths are the systems behind the tools. They are not the MCP endpoint.
